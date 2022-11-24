@@ -1,111 +1,89 @@
 import json
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 
-with open("KIRO-medium.json", "r") as read_file:
+with open("tiny1.json", "r") as read_file:
     data = json.load(read_file)
 
 
 # PARAMETERS
 parameters = data["parameters"]
-buildingcosts = parameters["buildingCosts"]
-productioncosts = parameters["productionCosts"]
-routingcosts = parameters["routingCosts"]
-capacitycost = parameters["capacityCost"]
-capacities = parameters["capacities"]
+jobs = data["jobs"]
+tasks = data["tasks"]
+J = len(jobs)
+I = len(tasks)
+size = parameters["size"]
+costs = parameters["costs"]
+release_date = [jobs[j]["release_date"] for j in range(J)]
+due_date = [jobs[j]["due_date"] for j in range(J)]
+weight = [jobs[j]["weight"] for j in range(J)]
+sequence = [jobs[j]["sequence"] for j in range(J)]
 
-# CLIENTS
-clients = data["clients"]
-nb_clients = len(clients)
-
-# SITE-SITE DISTANCES
-ss_distances = data["siteSiteDistances"]
-nb_sites = len(ss_distances)
-
-# SITE-CLIENT DISTANCES
-sc_distances = data["siteClientDistances"]
 
 # COST FUNCTION
 
+alpha = costs["unit_penalty"]
+beta = costs["tardiness"]
 
-def cost(p, d, auto, p_d, s_i):
+
+def cost(b):
 
     total_cost = 0
 
-    # Building Costs
-    for s in p:
-        total_cost += buildingcosts["productionCenter"] + auto[s] * buildingcosts["automationPenalty"]
-
-    total_cost += buildingcosts["distributionCenter"] * len(d)
-
-    # Production Costs
-    for i in range(nb_clients):
-        if s_i[i] in p:
-            total_cost += clients[i]["demand"] * (productioncosts["productionCenter"] - auto[s_i[i]] * productioncosts["automationBonus"])
+    for j in range(J):
+        cj = b[sequence[j][-1]-1] + tasks[sequence[j][-1]-1]["processing_time"]
+        tj = max(0, cj - due_date[j])
+        if cj > due_date[j]:
+            uj = 1
         else:
-            total_cost += clients[i]["demand"] * (productioncosts["productionCenter"] - auto[p_d[s_i[i]]] * productioncosts["automationBonus"] + productioncosts["distributionCenter"])
-
-    # Routing Costs
-    for i in range(nb_clients):
-        if s_i[i] in p:
-            total_cost += clients[i]["demand"] * routingcosts["secondary"] * sc_distances[s_i[i]][i]
-        else:
-            total_cost += clients[i]["demand"] * (routingcosts["primary"] * ss_distances[p_d[s_i[i]]][s_i[i]] + routingcosts["secondary"] * sc_distances[s_i[i]][i])
-
-    # Capacity Costs
-    for s in p:
-        for i in range(nb_clients):
-            if s_i[i] == s or (s_i[i] in d and p_d[s_i[i]]):
-                total_cost += capacitycost * max(clients[i]["demand"] - capacities["productionCenter"] - auto[s] * capacities["automationBonus"], 0)
+            uj = 0
+        total_cost += weight[j] * (cj + alpha * uj + beta * tj)
 
     return total_cost
 
 
 # ENCODE FUNCTION
 
-def encode_data(p, d, auto, p_d, s_i):
+def encode_data(b, m, o):
 
-    answer = {
-        "productionCenters": [],
-        "distributionCenters": [],
-        "clients": []
-    }
-    for s in p:
-        s_dict = {
-            "id": s+1,
-            "automation": auto[s]
-        }
-        answer["productionCenters"].append(s_dict)
+    answer = []
 
-    for s in d:
-        s_dict = {
-            "id": s+1,
-            "parent": p_d[s]+1
+    for i in range(I):
+        task_i = {
+            "task": i+1,
+            "start": b[i],
+            "machine": m[i],
+            "operator": o[i]
         }
-        answer["distributionCenters"].append(s_dict)
-
-    for i in range(nb_clients):
-        i_dict = {
-            "id": i+1,
-            "parent": s_i[i]+1
-        }
-        answer["clients"].append(i_dict)
+        answer.append(task_i)
 
     return answer
 
 
-"""
-# TINY EXAMPLE
+#CHECK FUNCTION
 
-P = [0]
-D = []
-Auto = [0]
-P_d = []
-S_i = [0, 0, 0]
 
-print(cost(P, D, Auto, P_d, S_i))
+def check(b, m, o):
+    check = True
+    for j in range(J):
+        check = check and (b[sequence[j][0]-1] >= release_date[j])
+        for i in range(len(sequence[j])-1):
+            check = check and (b[sequence[j][i+1]-1] >= b[sequence[j][i]-1] + tasks[sequence[j][i]-1]["processing_time"])
+    
+    for i in range(I):
+        for j in range(i+1, I):
+            if m[i] == m[j] or o[i] == o[j]:
+                check = check and (b[i] >= b[j] + tasks[j]["processing_time"]) and (b[i] + tasks[i]["processing_time"] <= b[j])
+    return check
+
+
+B = [0, 8, 14]
+M = [2, 1, 1]
+O = [1, 1, 1]
+
+print(cost(B))
+
+if check(B, M, O):
+    print("JE TENCULE")
 
 with open("answer_file.json", "w") as write_file:
-    json.dump(encode_data(P, D, Auto, P_d, S_i), write_file, indent=4)
-"""
+    json.dump(encode_data(B, M, O), write_file, indent=4)
